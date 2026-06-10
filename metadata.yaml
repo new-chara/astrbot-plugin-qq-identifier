@@ -3,4 +3,4 @@ display_name: QQ号识别
 desc: 基于QQ号识别用户，支持用户信息管理，并在回复时使用QQ号而非昵称来个性化回复内容
 version: v1.0.0
 author: new_chara
-repo: https://github.com/new-chara/astrbot_plugin_
+repo: https://github.com/new-chara/astrbot-plugin-qq-identifier
