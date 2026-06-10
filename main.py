@@ -3,24 +3,25 @@ import os
 import re
 
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.event.filter import EventMessageType, on_decorating_result
+from astrbot.api.event.filter import EventMessageType, on_llm_request
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.star.star import star_map
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+from astrbot.core.provider.entities import ProviderRequest
 
 # ---------- 配置 schema ----------
 _CONFIG_SCHEMA = {
-    "enable_decorating": {
-        "description": "是否在 LLM 回复中注入用户身份信息",
+    "enable_qq_context": {
+        "description": "在 LLM 请求中注入 QQ 号上下文（让 LLM 知道对话者是谁）",
         "type": "bool",
         "default": True,
     },
-    "decorating_format": {
-        "description": "注入格式模板，可用变量: {name}, {qq}, {tags}, {note}",
+    "context_format": {
+        "description": "注入到 system_prompt 的用户信息模板，可用: {name}, {qq}, {tags}, {note}",
         "type": "string",
-        "default": "[当前对话者是 {name}（QQ: {qq}）]",
+        "default": "当前与你对话的用户信息：\n- 名称: {name}\n- QQ号: {qq}\n- 标签: {tags}\n- 备注: {note}",
     },
 }
 
@@ -53,7 +54,7 @@ class QQIdentifierPlugin(Star):
     async def initialize(self):
         os.makedirs(os.path.dirname(self._users_path), exist_ok=True)
         self._load_users()
-        logger.info(f"[QQ号识别] 插件初始化完成，已加载 {len(self._users)} 个用户记录")
+        logger.info(f"[QQ号识别] 初始化完成，已加载 {len(self._users)} 个用户记录")
 
     async def terminate(self):
         logger.info("[QQ号识别] 插件已卸载")
@@ -108,19 +109,19 @@ class QQIdentifierPlugin(Star):
             parts.append(f"备注: {user['note']}")
         return " | ".join(parts)
 
-    def _apply_decorating_format(self, qq: str) -> str:
-        """根据模板生成用户上下文"""
+    def _build_context_text(self, qq: str) -> str:
+        """根据模板生成注入到 LLM prompt 的用户上下文"""
         user = self._get_user(qq) or {}
-        fmt = self._cfg.decorating_format
+        fmt = self._cfg.context_format
         try:
             return fmt.format(
-                name=user.get("name", f"未知用户"),
+                name=user.get("name", f"QQ用户"),
                 qq=qq,
-                tags=", ".join(user.get("tags", [])),
+                tags=", ".join(user.get("tags", [])) if user.get("tags") else "无",
                 note=user.get("note", "无"),
             )
         except KeyError:
-            return f"[QQ: {qq}]"
+            return f"当前对话者QQ号: {qq}"
 
     # ======================== 消息监听 ========================
 
@@ -139,6 +140,25 @@ class QQIdentifierPlugin(Star):
 
         logger.info(f"[QQ号识别] 收到消息 | {display} | 内容: {message_str[:50]}")
 
+    # ======================== LLM 请求钩子：注入 QQ 上下文 ========================
+
+    @on_llm_request()
+    async def inject_qq_context(self, event: AstrMessageEvent, req: ProviderRequest):
+        """在 LLM 生成回复前，将 QQ 号对应的用户信息注入到 system_prompt 中"""
+        if not self._cfg.enable_qq_context:
+            return
+
+        sender_id = event.get_sender_id()
+        context_text = self._build_context_text(sender_id)
+
+        # 注入到 system_prompt 开头，让 LLM 知道在和谁对话
+        if req.system_prompt:
+            req.system_prompt = f"{context_text}\n\n{req.system_prompt}"
+        else:
+            req.system_prompt = context_text
+
+        logger.info(f"[QQ号识别] 已为 QQ {sender_id} 注入上下文到 LLM 请求")
+
     # ======================== 命令 ========================
 
     @filter.command("qqinfo")
@@ -151,7 +171,6 @@ class QQIdentifierPlugin(Star):
         if not qq.strip():
             qq = event.get_sender_id()
 
-        # 提取纯数字 QQ 号
         qq = re.sub(r"\D", "", qq.strip())
         if not qq:
             yield event.plain_result("请输入有效的 QQ 号。")
@@ -253,15 +272,3 @@ class QQIdentifierPlugin(Star):
             yield event.plain_result(f"已删除 QQ {qq} 的记录。")
         else:
             yield event.plain_result(f"未找到 QQ {qq} 的记录。")
-
-    # ======================== LLM 回复装饰 ========================
-
-    @on_decorating_result()
-    async def decorate_reply(self, event: AstrMessageEvent):
-        """在 LLM 回复前注入用户身份信息"""
-        if not self._cfg.enable_decorating:
-            return
-
-        sender_id = event.get_sender_id()
-        user_ctx = self._apply_decorating_format(sender_id)
-        yield event.plain_result(f"{user_ctx}\n")
