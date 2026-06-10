@@ -3,7 +3,7 @@ import os
 import re
 
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.event.filter import EventMessageType, on_llm_request
+from astrbot.api.event.filter import EventMessageType, PermissionType, on_llm_request
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.config.astrbot_config import AstrBotConfig
@@ -159,9 +159,10 @@ class QQIdentifierPlugin(Star):
 
         logger.info(f"[QQ号识别] 已为 QQ {sender_id} 注入上下文到 LLM 请求")
 
-    # ======================== 命令 ========================
+    # ======================== 命令（仅管理员可用）========================
 
     @filter.command("qqinfo")
+    @filter.permission_type(PermissionType.ADMIN)
     async def qqinfo(self, event: AstrMessageEvent, qq: str = ""):
         """查询 QQ 用户信息
         
@@ -183,6 +184,7 @@ class QQIdentifierPlugin(Star):
         yield event.plain_result(info)
 
     @filter.command("qqset")
+    @filter.permission_type(PermissionType.ADMIN)
     async def qqset(self, event: AstrMessageEvent, name: str = "", qq: str = ""):
         """为 QQ 号设置自定义名称
         
@@ -205,6 +207,7 @@ class QQIdentifierPlugin(Star):
         yield event.plain_result(f"已设置 QQ {qq} 的名称为: {name}")
 
     @filter.command("qqtags")
+    @filter.permission_type(PermissionType.ADMIN)
     async def qqtags(self, event: AstrMessageEvent, qq: str = "", tags_str: str = ""):
         """为 QQ 号设置标签
         
@@ -223,6 +226,7 @@ class QQIdentifierPlugin(Star):
         yield event.plain_result(f"已设置 QQ {qq} 的标签: {', '.join(tags)}")
 
     @filter.command("qqnote")
+    @filter.permission_type(PermissionType.ADMIN)
     async def qqnote(self, event: AstrMessageEvent, qq: str = "", note: str = ""):
         """为 QQ 号添加备注
         
@@ -240,6 +244,7 @@ class QQIdentifierPlugin(Star):
         yield event.plain_result(f"已设置 QQ {qq} 的备注: {note.strip()}")
 
     @filter.command("qqlist")
+    @filter.permission_type(PermissionType.ADMIN)
     async def qqlist(self, event: AstrMessageEvent):
         """列出所有已记录的 QQ 用户"""
         if not self._users:
@@ -256,6 +261,7 @@ class QQIdentifierPlugin(Star):
         yield event.plain_result("\n".join(lines))
 
     @filter.command("qqdel")
+    @filter.permission_type(PermissionType.ADMIN)
     async def qqdel(self, event: AstrMessageEvent, qq: str = ""):
         """删除 QQ 号记录
         
